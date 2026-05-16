@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build + Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages (in dependency order)
+        run: |
+          pnpm --filter @eva/types build
+          pnpm --filter @eva/adas-mock build
+          pnpm --filter @eva/server build
+
+      - name: TypeScript typecheck (all packages)
+        run: |
+          pnpm --filter @eva/types typecheck
+          pnpm --filter @eva/adas-mock typecheck
+          pnpm --filter @eva/server typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @eva/server test
+        env:
+          # CI runs without real API keys — unit tests are all pure functions
+          # that don't call external services
+          NODE_ENV: test

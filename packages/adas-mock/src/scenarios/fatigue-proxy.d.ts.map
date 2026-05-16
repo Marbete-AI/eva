@@ -1,0 +1,1 @@
+{"version":3,"file":"fatigue-proxy.d.ts","sourceRoot":"","sources":["fatigue-proxy.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,YAAY,CAAC;AAG5C;;;;;;;;;;;;;;;;GAgBG;AAEH,UAAU,WAAW;IACnB,OAAO,EAAE,MAAM,CAAC;IAChB,OAAO,EAAE,KAAK,CAAC,IAAI,CAAC,SAAS,EAAE,WAAW,GAAG,QAAQ,GAAG,YAAY,CAAC,CAAC,CAAC;CACxE;AAED,eAAO,MAAM,oBAAoB,EAAE,WAAW,EAsF7C,CAAC"}

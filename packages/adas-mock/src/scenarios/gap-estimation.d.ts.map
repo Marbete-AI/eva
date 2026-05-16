@@ -1,0 +1,1 @@
+{"version":3,"file":"gap-estimation.d.ts","sourceRoot":"","sources":["gap-estimation.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,YAAY,CAAC;AAG5C;;;;;;;;;;;;;;;GAeG;AAEH,UAAU,WAAW;IACnB,OAAO,EAAE,MAAM,CAAC;IAChB,OAAO,EAAE,KAAK,CAAC,IAAI,CAAC,SAAS,EAAE,WAAW,GAAG,QAAQ,GAAG,YAAY,CAAC,CAAC,CAAC;CACxE;AAED,eAAO,MAAM,qBAAqB,EAAE,WAAW,EA2E9C,CAAC"}

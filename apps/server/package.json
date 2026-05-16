@@ -1,0 +1,40 @@
+{
+  "name": "@eva/server",
+  "version": "0.0.1",
+  "private": true,
+  "description": "EVA reasoning backend — Node.js + Hono",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file=.env dist/index.js",
+    "build": "tsc",
+    "start": "node --env-file=.env dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --config jest.config.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.1.0",
+    "@ai-sdk/google": "^1.1.0",
+    "@anthropic-ai/sdk": "^0.37.0",
+    "@eva/adas-mock": "workspace:*",
+    "@eva/types": "workspace:*",
+    "@hono/node-server": "^1.13.7",
+    "@supabase/supabase-js": "^2.47.10",
+    "ai": "^4.1.0",
+    "hono": "^4.6.20",
+    "openai": "^6.37.0",
+    "smartcar": "^10.4.0",
+    "uuid": "^11.0.3",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/node": "^22.10.2",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.13",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.7.2"
+  }
+}
