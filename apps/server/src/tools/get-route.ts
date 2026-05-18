@@ -32,12 +32,14 @@ interface GMapsElevationResponse {
 export function makeGetRouteTool(ctx: ToolCallContext) {
   return tool({
     description:
-      "Get route information between two locations: distance, estimated travel time with current traffic, road incidents, and elevation gain. Use for navigation queries and EV range/charge calculations.",
+      "Get route information between two locations: distance, estimated travel time with current traffic, road incidents, and elevation gain. Use for navigation queries and EV range/charge calculations. Accepts informal place names, city names, postcodes, road names, or full addresses — pass the destination exactly as the driver said it. Google Maps resolves the address internally. Do NOT pre-geocode or look up coordinates before calling this tool.",
     parameters: z.object({
       origin: z
         .string()
         .describe("Starting location, address, or 'current' for vehicle GPS position"),
-      destination: z.string().describe("Destination address or place name"),
+      destination: z
+        .string()
+        .describe("Destination exactly as the driver said it — informal names, city names, postcodes, or full addresses all work. Do not pre-resolve before calling."),
     }),
     execute: async ({ origin, destination }) => {
       console.log(

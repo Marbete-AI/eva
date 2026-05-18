@@ -87,15 +87,19 @@ const STATIC_RESPONSE_FORMAT = `<response_format>
 </response_format>`;
 
 const STATIC_TOOL_GUIDANCE = `<tool_guidance>
-- When the driver asks whether they can reach a destination on the current charge, or asks about range: call get_vehicle_state, then get_route, then calculate_range with the results. Do not guess — always calculate.
-- calculate_range requires batteryPercent and reportedRangeKm from get_vehicle_state, and routeDistanceKm and elevationGainM from get_route. If you have a recent temperature from get_weather, include it for accuracy.
-- If calculate_range returns verdict "borderline" or "no", tell the driver clearly and calmly. Suggest charging if appropriate. Never tell the driver they can make it when calculate_range says borderline or no.
-- If calculate_range returns verdict "yes" with estimatedArrivalPercent below 15, mention they will arrive with very little charge remaining and suggest having a charger in mind.
-- When calling get_route, check driver_memory for routing preferences (avoids motorways, prefers scenic, prefers faster) and factor them into your response.
-- When driver memory contains a routing preference, mention it naturally — e.g. "Taking the A-road to avoid motorways, as you prefer."
-- When calling get_vehicle_state, use the result to inform range calculations before answering range or charging questions.
+- When the driver asks whether they can reach a destination: (1) call get_vehicle_state, (2) call get_route with the destination EXACTLY as the driver said it — one call, no pre-processing, (3) immediately call calculate_range with the results. This sequence must complete in three steps. Do not deviate.
+- EXAMPLE: driver says "will I make it to manchester" → call get_route with destination="manchester" → get_route returns 300km → call calculate_range immediately with that result. Do not call ask_gemini. Do not call get_route again with "Manchester city centre" or "Manchester, UK". Use the first result.
+- ask_gemini is FORBIDDEN during the range query sequence. The only tools allowed in a range query are: get_vehicle_state, get_route (once), get_weather (optional), calculate_range. No exceptions.
+- NEVER call get_route more than once for the same destination. If get_route returns any result — even an approximate one — proceed immediately to calculate_range with that result.
+- calculate_range requires batteryPercent and reportedRangeKm from get_vehicle_state, and routeDistanceKm and elevationGainM from get_route. If get_route returns elevationGainM=0 that is fine — use it.
+- If calculate_range returns verdict "borderline" or "no", tell the driver clearly and calmly. Never say they can make it when the verdict is borderline or no.
+- If calculate_range returns verdict "yes" with estimatedArrivalPercent below 15, warn that they will arrive with very little charge.
+- After calculate_range returns verdict "borderline" or "no", offer to find a charging stop. Ask: "Want me to find a charging stop on the way?"
+- When the driver accepts a charging stop suggestion, call ask_gemini to find one, then call open_navigation to send it to their phone.
+- When the driver asks to navigate somewhere and open_navigation has not already been called, confirm first unless they explicitly said "navigate to" or "take me to".
+- When calling get_route, check driver_memory for routing preferences and mention them naturally if relevant.
 - When calling retrieve_memory, use a specific query — not generic. "routing preference" not "preferences".
-- When calling ask_gemini for location or navigation, pass the driver's known location context.
+- ask_gemini is for POI search, real-time grounding, and place details only — never for address resolution before get_route.
 </tool_guidance>`;
 
 // ── Dynamic sections (not cached — change per turn) ───────────────────────────
