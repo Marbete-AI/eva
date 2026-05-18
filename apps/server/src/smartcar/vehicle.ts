@@ -1,5 +1,6 @@
-import Smartcar from "smartcar";
-import { getSmartcarClient, getValidAccessToken, isSmartcarConfigured } from "./client.js";
+import { getApplicationToken, getSmartcarUserId, isSmartcarConfigured } from "./client.js";
+
+const SMARTCAR_API = "https://vehicle.api.smartcar.com/v3";
 
 export interface SmartcarVehicleData {
   vehicleId: string;
@@ -14,31 +15,129 @@ export interface SmartcarVehicleData {
   source: "smartcar" | "smartcar_mock";
 }
 
+// ── SmartCar v3 signal codes ───────────────────────────────────────────────
+// Signal API path: GET /v3/vehicles/{id}/signals/{signalCode}
+// Response envelope: { data: { id, type, attributes: { code, body: { value, unit, ... } } } }
+
+const SIGNALS = {
+  batteryLevel:  "tractionbattery-stateofcharge",  // body.value = 0-100 percent
+  batteryRange:  "tractionbattery-range",           // body.value = km
+  speed:         "motion-currentspeed",             // body.value = km/h
+  location:      "location-preciselocation",        // body.latitude, body.longitude
+  odometer:      "odometer-traveleddistance",       // body.value = km
+};
+
 /**
- * Fetch real vehicle state from SmartCar.
- * Reads battery, range, odometer, speed, location in parallel.
- * Falls back to mock data if SmartCar not configured or token unavailable.
+ * Fetch a single signal value from the SmartCar v3 API.
+ * Returns null if the signal is not configured or the vehicle doesn't support it.
+ */
+async function fetchSignal(
+  vehicleId: string,
+  signalCode: string,
+  headers: Record<string, string>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<Record<string, any> | null> {
+  try {
+    const res = await fetch(
+      `${SMARTCAR_API}/vehicles/${vehicleId}/signals/${signalCode}`,
+      { headers }
+    );
+    if (!res.ok) return null;
+
+    const body = (await res.json()) as {
+      data?: {
+        attributes?: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          body?: Record<string, any>;
+          status?: { value: string };
+        };
+      };
+    };
+
+    const status = body.data?.attributes?.status?.value;
+    if (status && status !== "SUCCESS") return null;
+
+    return body.data?.attributes?.body ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch vehicle state using SmartCar v3 REST API.
+ *
+ * Auth model:
+ *   - Application-level Bearer token (client_credentials, 1hr TTL)
+ *   - sc-user-id header identifies which user's vehicle to read
+ *
+ * Signal API: GET /v3/vehicles/{id}/signals/{signalCode}
+ * Connections API: GET /v3/connections (JSON:API format)
+ *
+ * Falls back to mock data if SmartCar not configured, user not connected,
+ * or signals not yet published in the simulator.
  */
 export async function getVehicleState(
-  userId: string,
+  driverId: string,
   vehicleId?: string
 ): Promise<SmartcarVehicleData> {
   if (!isSmartcarConfigured()) {
     return getMockVehicleState();
   }
 
-  const accessToken = await getValidAccessToken(userId);
-  if (!accessToken) {
-    console.warn("[smartcar] No valid access token for user — returning mock");
+  const smartcarUserId = await getSmartcarUserId(driverId);
+  if (!smartcarUserId) {
+    console.warn("[smartcar] No SmartCar user ID for driver — returning mock");
     return getMockVehicleState();
   }
 
+  const appToken = await getApplicationToken();
+  if (!appToken) {
+    console.warn("[smartcar] Could not get application token — returning mock");
+    return getMockVehicleState();
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${appToken}`,
+    "sc-user-id": smartcarUserId,
+  };
+
   try {
-    // Get list of vehicles if no vehicleId provided
+    // ── Resolve vehicle ID + sc-user-id ───────────────────────────────────
+    // Option B fallback: extract the real vehicle-owner user ID from the
+    // connections response at query time. This corrects the sc-user-id even
+    // if the callback stored the OAuth user ID instead of the owner user ID.
     let resolvedVehicleId = vehicleId;
+    let effectiveScUserId = smartcarUserId; // may be overridden below
+
     if (!resolvedVehicleId) {
-      const { vehicles } = await Smartcar.getVehicles(accessToken);
-      resolvedVehicleId = vehicles[0];
+      const connectionsRes = await fetch(`${SMARTCAR_API}/connections`, { headers });
+      if (!connectionsRes.ok) {
+        console.error(`[smartcar] Connections API error: ${connectionsRes.status}`);
+        return getMockVehicleState();
+      }
+
+      // SmartCar v3 uses JSON:API format
+      const connectionsBody = (await connectionsRes.json()) as {
+        data: Array<{
+          relationships: {
+            vehicle: { data: { id: string } };
+            user: { data: { id: string } };
+          };
+        }>;
+      };
+
+      const connection = connectionsBody.data[0];
+      resolvedVehicleId = connection?.relationships?.vehicle?.data?.id;
+
+      // Extract real vehicle-owner user ID from the connection — this is the
+      // correct sc-user-id for signal/vehicle API calls (Option B fallback).
+      const ownerUserId = connection?.relationships?.user?.data?.id;
+      if (ownerUserId && ownerUserId !== smartcarUserId) {
+        console.log(`[smartcar] Using vehicle-owner sc-user-id from connection: ${ownerUserId}`);
+        effectiveScUserId = ownerUserId;
+        // Update headers for subsequent signal calls
+        headers["sc-user-id"] = effectiveScUserId;
+      }
     }
 
     if (!resolvedVehicleId) {
@@ -46,56 +145,36 @@ export async function getVehicleState(
       return getMockVehicleState();
     }
 
-    const vehicle = new Smartcar.Vehicle(resolvedVehicleId, accessToken);
+    console.log(`[smartcar] Reading signals for vehicle ${resolvedVehicleId}`);
 
-    // Fetch all signals in parallel — each call is independent
-    const [battery, odometer, location, speed] = await Promise.allSettled([
-      vehicle.battery(),
-      vehicle.odometer(),
-      vehicle.location(),
-      vehicle.speed?.() ?? Promise.reject("speed not available"),
+    // ── Fetch all signals in parallel ──────────────────────────────────────
+    const [battery, range, speed, location, odometer] = await Promise.all([
+      fetchSignal(resolvedVehicleId, SIGNALS.batteryLevel, headers),
+      fetchSignal(resolvedVehicleId, SIGNALS.batteryRange, headers),
+      fetchSignal(resolvedVehicleId, SIGNALS.speed, headers),
+      fetchSignal(resolvedVehicleId, SIGNALS.location, headers),
+      fetchSignal(resolvedVehicleId, SIGNALS.odometer, headers),
     ]);
 
-    const batteryData = battery.status === "fulfilled" ? battery.value : null;
-    const odometerData = odometer.status === "fulfilled" ? odometer.value : null;
-    const locationData = location.status === "fulfilled" ? location.value : null;
-    const speedData = speed.status === "fulfilled" ? speed.value : null;
-
-    // SmartCar returns range in km for metric, miles for imperial
-    // percentRemaining is 0.0–1.0
-    const batteryPercent = batteryData
-      ? Math.round((batteryData as { percentRemaining: number }).percentRemaining * 100)
-      : null;
-
-    const rangeKm = batteryData
-      ? Math.round((batteryData as { range: { value: number } }).range?.value ?? 0)
-      : null;
-
-    const odometerKm = odometerData
-      ? Math.round((odometerData as { distance: { value: number } }).distance?.value ?? 0)
-      : null;
-
-    const loc = locationData
-      ? {
-          lat: (locationData as { data: { latitude: number; longitude: number } }).data?.latitude,
-          lon: (locationData as { data: { latitude: number; longitude: number } }).data?.longitude,
-        }
-      : null;
-
-    const speedKmh = speedData
-      ? Math.round((speedData as { speed: { value: number } }).speed?.value ?? 0)
-      : null;
+    // If no signals came back at all, the vehicle has no state configured yet
+    // in the simulator — fall back to mock so EVA can still respond meaningfully
+    if (!battery && !range && !speed && !location && !odometer) {
+      console.warn("[smartcar] No signal data available — vehicle may need simulator state configured");
+      return { ...getMockVehicleState(), vehicleId: resolvedVehicleId };
+    }
 
     return {
       vehicleId: resolvedVehicleId,
-      batteryPercent,
-      rangeKm,
-      speedKmh,
-      location: loc?.lat && loc?.lon ? { lat: loc.lat, lon: loc.lon } : null,
-      odometer: odometerKm,
-      driveMode: null, // Not available on all vehicles
+      batteryPercent: battery?.["value"] != null ? Math.round(battery["value"]) : null,
+      rangeKm:        range?.["value"] != null ? Math.round(range["value"]) : null,
+      speedKmh:       speed?.["value"] != null ? Math.round(speed["value"]) : null,
+      location: location?.["latitude"] != null && location?.["longitude"] != null
+        ? { lat: location["latitude"] as number, lon: location["longitude"] as number }
+        : null,
+      odometer: odometer?.["value"] != null ? Math.round(odometer["value"]) : null,
+      driveMode: null,
       lastReadAt: new Date().toISOString(),
-      widthMm: null, // Not available via SmartCar API — set from user preferences
+      widthMm: null,
       source: "smartcar",
     };
   } catch (err) {

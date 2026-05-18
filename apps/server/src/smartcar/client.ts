@@ -1,43 +1,180 @@
-import Smartcar from "smartcar";
+import { createRequire } from "module";
 import { getSupabaseClient } from "../memory/supabase-client.js";
 
-const CLIENT_ID = process.env["SMARTCAR_CLIENT_ID"] ?? "";
-const CLIENT_SECRET = process.env["SMARTCAR_CLIENT_SECRET"] ?? "";
-const REDIRECT_URI = process.env["SMARTCAR_REDIRECT_URI"] ?? "http://localhost:8787/smartcar/callback";
+// Use createRequire to load the CJS smartcar package correctly in ESM context.
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const sc = require("smartcar") as Record<string, any>;
+const AuthClient = sc["AuthClient"] as new (opts: {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  mode?: "simulated" | "live" | "test";
+}) => {
+  getAuthUrl(opts?: { state?: string; scope?: string[]; forcePrompt?: boolean }): string;
+};
 
-let _client: InstanceType<typeof Smartcar> | null = null;
+const SMARTCAR_IAM_URL = "https://iam.smartcar.com/oauth2/token";
 
-export function getSmartcarClient(): InstanceType<typeof Smartcar> {
-  if (!_client) {
-    _client = new Smartcar({
-      clientId: CLIENT_ID,
-      clientSecret: CLIENT_SECRET,
-      redirectUri: REDIRECT_URI,
-      mode: (process.env["SMARTCAR_MODE"] ?? "simulated") as "simulated" | "live" | "test",
-    });
-  }
-  return _client;
+// ── AuthClient (Connect URL generation only) ──────────────────────────────────
+
+let _authClient: InstanceType<typeof AuthClient> | null = null;
+
+export function getSmartcarClient(): InstanceType<typeof AuthClient> {
+  const clientId = process.env["SMARTCAR_CLIENT_ID"] ?? "";
+  const clientSecret = process.env["SMARTCAR_CLIENT_SECRET"] ?? "";
+  const redirectUri = process.env["SMARTCAR_REDIRECT_URI"] ?? "http://localhost:8787/smartcar/callback";
+  const mode = (process.env["SMARTCAR_MODE"] ?? "simulated") as "simulated" | "live" | "test";
+
+  if (_authClient) return _authClient;
+
+  _authClient = new AuthClient({ clientId, clientSecret, redirectUri, mode });
+  return _authClient;
 }
 
 export function isSmartcarConfigured(): boolean {
-  return !!(CLIENT_ID && CLIENT_SECRET);
+  return !!(
+    process.env["SMARTCAR_CLIENT_ID"] &&
+    process.env["SMARTCAR_CLIENT_SECRET"]
+  );
 }
 
-// ── Token storage ──────────────────────────────────────────────────────────────
+// ── Application-level access token (OAuth 2.0 client_credentials) ─────────────
+//
+// SmartCar v3 uses a single application-level token for all API calls.
+// The token is valid for 1 hour. There is no refresh token — just re-fetch.
+// We cache it in memory with expiry; no need to persist to DB.
 
-export interface SmartcarTokens {
+interface AppToken {
   accessToken: string;
-  refreshToken: string;
-  expiresAt: string; // ISO 8601
+  expiresAt: number; // Unix ms
 }
+
+let _appToken: AppToken | null = null;
+
+export async function getApplicationToken(): Promise<string | null> {
+  // API credentials (client_credentials grant) are separate from OAuth Connect
+  // credentials. Set SMARTCAR_API_CLIENT_ID and SMARTCAR_API_CLIENT_SECRET
+  // from the "API Credentials" tab in the SmartCar dashboard.
+  // Falls back to the OAuth credentials if API-specific ones are not set.
+  const clientId = process.env["SMARTCAR_API_CLIENT_ID"]
+    ?? process.env["SMARTCAR_CLIENT_ID"]
+    ?? "";
+  const clientSecret = process.env["SMARTCAR_API_CLIENT_SECRET"]
+    ?? process.env["SMARTCAR_CLIENT_SECRET"]
+    ?? "";
+
+  if (!clientId || !clientSecret) return null;
+
+  // Return cached token if still valid (with 60s buffer)
+  if (_appToken && Date.now() < _appToken.expiresAt - 60_000) {
+    return _appToken.accessToken;
+  }
+
+  try {
+    const response = await fetch(SMARTCAR_IAM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`[smartcar] Failed to get app token: ${response.status} ${text}`);
+      return null;
+    }
+
+    const data = (await response.json()) as { access_token: string; expires_in: number };
+    _appToken = {
+      accessToken: data.access_token,
+      expiresAt: Date.now() + data.expires_in * 1000,
+    };
+
+    console.log(`[smartcar] App token obtained, expires in ${data.expires_in}s`);
+    return _appToken.accessToken;
+  } catch (err) {
+    console.error("[smartcar] App token fetch failed:", err);
+    return null;
+  }
+}
+
+// ── SmartCar user ID resolution ───────────────────────────────────────────────
+//
+// SmartCar has two different user identifiers:
+//
+//   OAuth callback user_id  — identifies the OAuth session (who connected)
+//   Connection owner user_id — relationships.user.data.id on the connection object
+//                              This is the correct sc-user-id for API calls
+//
+// We resolve the correct one at connect time by calling the connections API
+// immediately after the callback, so the right ID is stored from the start.
+
+const SMARTCAR_V3_API = "https://vehicle.api.smartcar.com/v3";
 
 /**
- * Store SmartCar OAuth tokens for a user.
- * Tokens are upserted — only one set per user.
+ * Resolve the vehicle-owner user ID (sc-user-id) for a given OAuth user ID.
+ *
+ * The OAuth callback returns a `user_id` that identifies the OAuth session.
+ * The connections API returns the vehicle owner's user ID under
+ * `data[0].relationships.user.data.id` — this is what the sc-user-id header
+ * needs to be set to for vehicle API calls to work correctly.
+ *
+ * Falls back to the OAuth user ID if the connections API call fails.
  */
-export async function storeSmartcarTokens(
-  userId: string,
-  tokens: SmartcarTokens
+export async function resolveVehicleOwnerUserId(
+  oauthUserId: string,
+  appToken: string
+): Promise<string> {
+  try {
+    const res = await fetch(`${SMARTCAR_V3_API}/connections`, {
+      headers: {
+        Authorization: `Bearer ${appToken}`,
+        "sc-user-id": oauthUserId,
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`[smartcar] Could not resolve vehicle owner user ID: ${res.status}`);
+      return oauthUserId;
+    }
+
+    const body = (await res.json()) as {
+      data: Array<{
+        relationships: {
+          user: { data: { id: string } };
+        };
+      }>;
+    };
+
+    const vehicleOwnerUserId = body.data[0]?.relationships?.user?.data?.id;
+    if (!vehicleOwnerUserId) {
+      console.warn("[smartcar] No vehicle owner user ID in connections response — using OAuth user ID");
+      return oauthUserId;
+    }
+
+    if (vehicleOwnerUserId !== oauthUserId) {
+      console.log(`[smartcar] Resolved vehicle owner user ID: ${vehicleOwnerUserId} (OAuth was: ${oauthUserId})`);
+    }
+
+    return vehicleOwnerUserId;
+  } catch (err) {
+    console.error("[smartcar] resolveVehicleOwnerUserId failed:", err);
+    return oauthUserId;
+  }
+}
+
+// ── SmartCar user ID storage ──────────────────────────────────────────────────
+//
+// We store the resolved vehicle-owner user ID (sc-user-id) per EVA driver.
+// This is the correct ID to use as the sc-user-id header on all API calls.
+
+export async function storeSmartcarUserId(
+  driverId: string,
+  smartcarUserId: string
 ): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
@@ -46,88 +183,38 @@ export async function storeSmartcarTokens(
     .from("smartcar_tokens")
     .upsert(
       {
-        user_id: userId,
-        access_token: tokens.accessToken,
-        refresh_token: tokens.refreshToken,
-        expires_at: tokens.expiresAt,
+        user_id: driverId,
+        smartcar_user_id: smartcarUserId,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
     );
 
   if (error) {
-    console.error("[smartcar] Failed to store tokens:", error.message);
+    console.error("[smartcar] Failed to store SmartCar user ID:", error.message);
   }
 }
 
-/**
- * Retrieve stored SmartCar tokens for a user.
- * Returns null if not configured or no tokens stored.
- */
-export async function getSmartcarTokens(
-  userId: string
-): Promise<SmartcarTokens | null> {
+export async function getSmartcarUserId(
+  driverId: string
+): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
   const { data, error } = await supabase
     .from("smartcar_tokens")
-    .select("access_token, refresh_token, expires_at")
-    .eq("user_id", userId)
+    .select("smartcar_user_id")
+    .eq("user_id", driverId)
     .single();
 
   if (error || !data) return null;
-
-  return {
-    accessToken: data.access_token as string,
-    refreshToken: data.refresh_token as string,
-    expiresAt: data.expires_at as string,
-  };
+  return (data.smartcar_user_id as string) ?? null;
 }
 
-/**
- * Refresh expired tokens and store the new ones.
- */
-export async function refreshSmartcarTokens(
-  userId: string,
-  refreshToken: string
-): Promise<SmartcarTokens | null> {
-  const client = getSmartcarClient();
-
-  try {
-    const newTokens = await client.exchangeRefreshToken(refreshToken);
-
-    const tokens: SmartcarTokens = {
-      accessToken: newTokens.accessToken,
-      refreshToken: newTokens.refreshToken,
-      expiresAt: newTokens.expiration.toISOString(),
-    };
-
-    await storeSmartcarTokens(userId, tokens);
-    return tokens;
-  } catch (err) {
-    console.error("[smartcar] Token refresh failed:", err);
-    return null;
-  }
-}
-
-/**
- * Get a valid access token — refreshes automatically if expired.
- */
-export async function getValidAccessToken(
-  userId: string
-): Promise<string | null> {
-  const tokens = await getSmartcarTokens(userId);
-  if (!tokens) return null;
-
-  const expiresAt = new Date(tokens.expiresAt);
-  const now = new Date();
-
-  // Refresh if expires within 5 minutes
-  if (expiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
-    const refreshed = await refreshSmartcarTokens(userId, tokens.refreshToken);
-    return refreshed?.accessToken ?? null;
-  }
-
-  return tokens.accessToken;
+// Keep old interface for any callers that check connection status
+export async function getSmartcarTokens(
+  driverId: string
+): Promise<{ connected: true } | null> {
+  const userId = await getSmartcarUserId(driverId);
+  return userId ? { connected: true } : null;
 }

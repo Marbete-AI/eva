@@ -21,10 +21,10 @@ export class DriverContextManager {
   private latestMetrics: InterpretedMetrics | null = null;
   private sessionStartTime: Date;
 
-  constructor(driverId?: string) {
-    const sessionId = uuidv4();
+  constructor(driverId?: string, sessionId?: string) {
+    const resolvedSessionId = sessionId ?? uuidv4();
     const resolvedDriverId = driverId ?? uuidv4();
-    this.context = createDefaultDriverContext(resolvedDriverId, sessionId);
+    this.context = createDefaultDriverContext(resolvedDriverId, resolvedSessionId);
     this.sessionStartTime = new Date();
   }
 

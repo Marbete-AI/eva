@@ -1,9 +1,11 @@
 import { Hono } from "hono";
-import Smartcar from "smartcar";
 import {
   getSmartcarClient,
   isSmartcarConfigured,
-  storeSmartcarTokens,
+  storeSmartcarUserId,
+  getSmartcarTokens,
+  getApplicationToken,
+  resolveVehicleOwnerUserId,
 } from "../smartcar/client.js";
 
 const smartcarRoutes = new Hono();
@@ -11,7 +13,7 @@ const smartcarRoutes = new Hono();
 /**
  * GET /smartcar/auth?userId=xxx
  * Returns the SmartCar Connect URL for the mobile app to open in a browser.
- * The userId is passed through as state so we can associate tokens on callback.
+ * The EVA driverId is passed through as state so we can associate on callback.
  */
 smartcarRoutes.get("/smartcar/auth", (c) => {
   if (!isSmartcarConfigured()) {
@@ -29,7 +31,6 @@ smartcarRoutes.get("/smartcar/auth", (c) => {
   const client = getSmartcarClient();
   const authUrl = client.getAuthUrl({
     state: userId,
-    // Request the permissions EVA needs
     scope: [
       "read_vehicle_info",
       "read_battery",
@@ -45,53 +46,63 @@ smartcarRoutes.get("/smartcar/auth", (c) => {
 });
 
 /**
- * GET /smartcar/callback?code=xxx&state=xxx
- * SmartCar redirects here after the user connects their vehicle.
- * Exchanges the code for tokens, stores them, redirects back to the app.
+ * GET /smartcar/callback?code=xxx&user_id=xxx&state=xxx
+ *
+ * SmartCar v3 callback — no token exchange needed.
+ * SmartCar sends the user_id directly as a query param.
+ * We store it against the EVA driverId (passed as state).
  */
 smartcarRoutes.get("/smartcar/callback", async (c) => {
   if (!isSmartcarConfigured()) {
     return c.text("SmartCar not configured", 503);
   }
 
-  const code = c.req.query("code");
-  const userId = c.req.query("state"); // We passed userId as state
+  // SmartCar v3 sends user_id directly — no code exchange needed
+  const smartcarUserId = c.req.query("user_id");
+  const driverId = c.req.query("state"); // EVA driverId passed as state
 
-  if (!code || !userId) {
-    return c.text("Missing code or state", 400);
+  console.log(`[smartcar] Callback — smartcarUserId=${smartcarUserId} driverId=${driverId}`);
+
+  if (!smartcarUserId || !driverId) {
+    console.error("[smartcar] Callback missing user_id or state", {
+      smartcarUserId,
+      driverId,
+      allParams: Object.fromEntries(new URL(c.req.url).searchParams),
+    });
+    return c.redirect("eva://smartcar/error");
   }
 
   try {
-    const client = getSmartcarClient();
-    const tokens = await client.exchangeCode(code);
+    // Option A: Resolve the real vehicle-owner sc-user-id at connect time.
+    // The OAuth callback gives us an OAuth session user_id which differs from
+    // the vehicle owner user_id needed for sc-user-id header on API calls.
+    // We get the app token and resolve the correct ID immediately.
+    let resolvedUserId = smartcarUserId;
+    const appToken = await getApplicationToken();
+    if (appToken) {
+      resolvedUserId = await resolveVehicleOwnerUserId(smartcarUserId, appToken);
+    } else {
+      console.warn("[smartcar] No app token — storing OAuth user ID as fallback");
+    }
 
-    await storeSmartcarTokens(userId, {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      expiresAt: tokens.expiration.toISOString(),
-    });
-
-    console.log(`[smartcar] Tokens stored for user ${userId}`);
-
-    // Deep-link back to the EVA app — the app handles eva://smartcar/success
-    return c.redirect(`eva://smartcar/success?userId=${userId}`);
+    await storeSmartcarUserId(driverId, resolvedUserId);
+    console.log(`[smartcar] SmartCar user ID stored for driver ${driverId} (sc-user-id: ${resolvedUserId})`);
+    return c.redirect(`eva://smartcar/success?userId=${driverId}`);
   } catch (err) {
-    console.error("[smartcar] OAuth callback error:", err);
-    return c.redirect(`eva://smartcar/error`);
+    console.error("[smartcar] Failed to store user ID:", err);
+    return c.redirect("eva://smartcar/error");
   }
 });
 
 /**
  * GET /smartcar/status?userId=xxx
- * Returns whether a user has connected their vehicle.
+ * Returns whether a driver has connected their vehicle via SmartCar.
  */
 smartcarRoutes.get("/smartcar/status", async (c) => {
   const userId = c.req.query("userId");
   if (!userId) return c.json({ connected: false });
 
-  const { getSmartcarTokens } = await import("../smartcar/client.js");
   const tokens = await getSmartcarTokens(userId);
-
   return c.json({ connected: !!tokens });
 });
 

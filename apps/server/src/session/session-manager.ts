@@ -65,7 +65,9 @@ export class EvaSession {
     this.sessionId = uuidv4();
     this.driverId = driverId ?? uuidv4();
     this.ws = ws;
-    this.ctxManager = new DriverContextManager(this.driverId);
+    // Pass sessionId so DriverContextManager uses the same ID that gets
+    // written to Supabase — prevents FK violations on messages table.
+    this.ctxManager = new DriverContextManager(this.driverId, this.sessionId);
   }
 
   /**
