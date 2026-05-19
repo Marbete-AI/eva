@@ -17,6 +17,7 @@
     "@ai-sdk/google": "^1.1.0",
     "@anthropic-ai/sdk": "^0.37.0",
     "@eva/adas-mock": "workspace:*",
+    "@eva/signal-interpreter": "workspace:*",
     "@eva/types": "workspace:*",
     "@hono/node-server": "^1.13.7",
     "@supabase/supabase-js": "^2.47.10",

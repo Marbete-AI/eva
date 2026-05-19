@@ -2,12 +2,14 @@ import type { ReasoningTrigger, DriverContext, InterpretedMetrics } from "@eva/t
 import { runOrchestrator } from "./orchestrator.js";
 import type { SessionMode } from "@eva/types";
 import { runPostTurnExtractor } from "../memory/extractor/run-extractor.js";
+import type { NavigationPayload } from "../tools/open-navigation.js";
 
 export interface LoopInput {
   trigger: ReasoningTrigger;
   context: DriverContext;
   metrics: InterpretedMetrics | null;
   onModeChange?: (mode: SessionMode) => void;
+  onNavigation?: (payload: NavigationPayload) => void;
 }
 
 export interface LoopOutput {
@@ -31,7 +33,7 @@ export interface LoopOutput {
  * session can reuse the same reasoning path without duplication.
  */
 export async function runReasoningLoop(input: LoopInput): Promise<LoopOutput> {
-  const { trigger, context, metrics, onModeChange } = input;
+  const { trigger, context, metrics, onModeChange, onNavigation } = input;
 
   // Timer triggers: silent context refresh — no response to driver
   if (trigger.type === "timer") {
@@ -71,6 +73,7 @@ export async function runReasoningLoop(input: LoopInput): Promise<LoopOutput> {
     context,
     metrics,
     ...(onModeChange !== undefined ? { onModeChange } : {}),
+    ...(onNavigation !== undefined ? { onNavigation } : {}),
   });
 
   // Fire-and-forget passive memory extraction — never blocks driver response

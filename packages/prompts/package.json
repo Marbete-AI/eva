@@ -2,22 +2,13 @@
   "name": "@eva/prompts",
   "version": "0.0.1",
   "private": true,
-  "description": "Versioned prompt templates for EVA",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "description": "Versioned EVA prompt templates — system prompts, tool guidance, persona blocks",
+  "type": "module",
   "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "@eva/types": "workspace:*"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

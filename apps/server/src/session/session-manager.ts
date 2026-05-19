@@ -25,6 +25,7 @@ export type ServerMessage =
   | { type: "eva_audio"; audioBase64: string; requestId: string }
   | { type: "asr_transcript"; transcript: string; confidence: number }
   | { type: "context_update"; metrics: InterpretedMetrics | null; mode: SessionMode }
+  | { type: "open_navigation"; destination: string; label: string; googleMapsUrl: string; appleMapsUrl: string; reason: string }
   | { type: "error"; message: string };
 
 /**
@@ -282,6 +283,17 @@ export class EvaSession {
         context,
         metrics,
         onModeChange: (mode: SessionMode) => this.ctxManager.setMode(mode),
+        onNavigation: (payload) => {
+          this.send({
+            type: "open_navigation",
+            destination: payload.destination,
+            label: payload.label,
+            googleMapsUrl: payload.googleMapsUrl,
+            appleMapsUrl: payload.appleMapsUrl,
+            reason: payload.reason,
+          });
+          console.log(`[session:${this.sessionId}] Navigation sent: "${payload.label}" (${payload.reason})`);
+        },
       });
 
       if (result.shouldRespond && result.text) {
@@ -295,6 +307,21 @@ export class EvaSession {
 
         // 2. Generate TTS audio and send — fire-and-forget, non-blocking
         void this.sendTTSAudio(result.text, result.requestId, context.persona);
+      } else if (result.shouldRespond && !result.text) {
+        // Tool steps were exhausted before a text response could be generated.
+        // Log it clearly so it is diagnosable, and tell the driver something happened.
+        console.warn(
+          `[session:${this.sessionId}] All tool steps used — no text response generated. ` +
+          `Trigger: ${trigger.type}. requestId: ${result.requestId}`
+        );
+        const fallback = "I looked into that but ran out of steps to give you a proper answer. Try asking again.";
+        this.send({
+          type: "eva_response",
+          text: fallback,
+          requestId: result.requestId,
+          trigger: trigger.type,
+        });
+        void this.sendTTSAudio(fallback, result.requestId, context.persona);
       }
     } catch (err) {
       console.error(`[session:${this.sessionId}] Reasoning error:`, err);

@@ -87,10 +87,9 @@ const STATIC_RESPONSE_FORMAT = `<response_format>
 </response_format>`;
 
 const STATIC_TOOL_GUIDANCE = `<tool_guidance>
-- When the driver asks whether they can reach a destination: (1) call get_vehicle_state, (2) call get_route with the destination EXACTLY as the driver said it — one call, no pre-processing, (3) immediately call calculate_range with the results. This sequence must complete in three steps. Do not deviate.
-- EXAMPLE: driver says "will I make it to manchester" → call get_route with destination="manchester" → get_route returns 300km → call calculate_range immediately with that result. Do not call ask_gemini. Do not call get_route again with "Manchester city centre" or "Manchester, UK". Use the first result.
-- ask_gemini is FORBIDDEN during the range query sequence. The only tools allowed in a range query are: get_vehicle_state, get_route (once), get_weather (optional), calculate_range. No exceptions.
-- NEVER call get_route more than once for the same destination. If get_route returns any result — even an approximate one — proceed immediately to calculate_range with that result.
+- When the driver asks whether they can reach a destination, follow this exact sequence: (1) get_vehicle_state, (2) get_route with the destination exactly as the driver said it, (3) calculate_range with the results. If you need to disambiguate the destination, you may call ask_gemini ONCE before get_route — but after that single ask_gemini call you must call get_route exactly once and then calculate_range immediately. Total tools in a range query: maximum 5 (get_vehicle_state + optional ask_gemini + get_route + optional get_weather + calculate_range).
+- EXAMPLE: driver says "will I make it to Old Trafford" → ask_gemini once to confirm which Old Trafford → get_route once with the resolved name → calculate_range immediately. Do not call get_route again with a more precise postcode. Do not call ask_gemini again.
+- NEVER call get_route more than once per range query. NEVER call ask_gemini more than once per range query. Once get_route returns any distance result, call calculate_range immediately with that distance — do not seek a more precise route first.
 - calculate_range requires batteryPercent and reportedRangeKm from get_vehicle_state, and routeDistanceKm and elevationGainM from get_route. If get_route returns elevationGainM=0 that is fine — use it.
 - If calculate_range returns verdict "borderline" or "no", tell the driver clearly and calmly. Never say they can make it when the verdict is borderline or no.
 - If calculate_range returns verdict "yes" with estimatedArrivalPercent below 15, warn that they will arrive with very little charge.

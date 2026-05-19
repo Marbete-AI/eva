@@ -7,7 +7,7 @@ import {
   deriveOvertakeLikelihood,
   deriveGapFitMarginMeters,
   interpretSignals,
-} from "../interpreters/signal-interpreter.js";
+} from "@eva/signal-interpreter";
 import type { VssSignal, AdasSignalFrame } from "@eva/types";
 import { VSS } from "@eva/adas-mock";
 

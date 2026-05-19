@@ -14,6 +14,8 @@ import { makeSetModeTool } from "../tools/set-mode.js";
 import { makeInitiateCallTool } from "../tools/initiate-call.js";
 import { makeAskGeminiTool } from "../tools/ask-gemini.js";
 import { makeCalculateRangeTool } from "../tools/calculate-range.js";
+import { makeOpenNavigationTool } from "../tools/open-navigation.js";
+import type { NavigationPayload } from "../tools/open-navigation.js";
 import { writeMessage, getConversationWindow } from "../memory/messages.js";
 import { getPendingConfirmations } from "../memory/extractor/confirmation-queue.js";
 import { expireRejectedCandidates } from "../memory/extractor/rejection-bank.js";
@@ -28,6 +30,7 @@ export interface OrchestratorInput {
   context: DriverContext;
   metrics: InterpretedMetrics | null;
   onModeChange?: ((mode: SessionMode) => void) | undefined;
+  onNavigation?: ((payload: NavigationPayload) => void) | undefined;
 }
 
 export interface OrchestratorResult {
@@ -48,7 +51,7 @@ export async function runOrchestrator(
   input: OrchestratorInput
 ): Promise<OrchestratorResult> {
   const requestId = uuidv4();
-  const { message, context, metrics, onModeChange } = input;
+  const { message, context, metrics, onModeChange, onNavigation } = input;
 
   const config = getReasoningConfig();
   const model = createReasoningModel(config);
@@ -85,7 +88,7 @@ export async function runOrchestrator(
     model,
     system: systemPrompt,
     prompt: message,
-    maxSteps: 5,
+    maxSteps: 12,
     tools: {
       get_vehicle_state: makeGetVehicleStateTool(toolCtx),
       get_adas_signals: makeGetAdasSignalsTool(toolCtx, () => metrics),
@@ -98,6 +101,7 @@ export async function runOrchestrator(
       initiate_call: makeInitiateCallTool(toolCtx),
       ask_gemini: makeAskGeminiTool(toolCtx),
       calculate_range: makeCalculateRangeTool(toolCtx),
+      open_navigation: makeOpenNavigationTool(toolCtx, onNavigation ?? (() => {})),
     },
   });
 

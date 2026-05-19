@@ -59,7 +59,7 @@ export function makeAskGeminiTool(ctx: ToolCallContext) {
           : "You are a helpful assistant providing concise, factual information.";
 
         const result = await generateText({
-          model: google("gemini-2.0-flash"),
+          model: google("gemini-2.5-flash"),
           system: systemPrompt,
           prompt,
           maxTokens: 512,

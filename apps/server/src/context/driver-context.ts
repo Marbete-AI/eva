@@ -6,7 +6,7 @@ import type {
   AdasSignalFrame,
 } from "@eva/types";
 import { createDefaultDriverContext } from "@eva/types";
-import { interpretSignals } from "../interpreters/signal-interpreter.js";
+import { interpretSignals } from "@eva/signal-interpreter";
 
 /**
  * Live driver context manager.

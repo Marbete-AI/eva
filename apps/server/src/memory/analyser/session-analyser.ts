@@ -242,7 +242,9 @@ Identify behavioural patterns visible across this evidence.`;
       maxTokens: 1024,
     });
 
-    const parsed = JSON.parse(result.text.trim()) as unknown[];
+    // Strip markdown code fences if the model wraps its response in them
+    const raw = result.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const parsed = JSON.parse(raw) as unknown[];
     if (!Array.isArray(parsed)) return [];
 
     return parsed.filter(isValidPattern) as DetectedPattern[];
