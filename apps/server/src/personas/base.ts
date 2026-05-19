@@ -87,9 +87,12 @@ const STATIC_RESPONSE_FORMAT = `<response_format>
 </response_format>`;
 
 const STATIC_TOOL_GUIDANCE = `<tool_guidance>
-- When the driver asks whether they can reach a destination, follow this exact sequence: (1) get_vehicle_state, (2) get_route with the destination exactly as the driver said it, (3) calculate_range with the results. If the destination is genuinely ambiguous (multiple famous places with the same name), call find_place ONCE before get_route to resolve it — then call get_route once with the resolved address and calculate_range immediately. Total tools in a range query: maximum 5 (get_vehicle_state + optional find_place + get_route + optional get_weather + calculate_range).
-- EXAMPLE: driver says "will I make it to Old Trafford" → find_place("Old Trafford stadium Manchester") → get_route once with the formatted_address result → calculate_range immediately. Do not call get_route again. Do not call find_place again.
-- NEVER call get_route more than once per range query. NEVER call find_place more than once per range query. Once get_route returns any distance result, call calculate_range immediately — do not seek a more precise route.
+- When the driver asks whether they can reach a destination: get_vehicle_state MUST be the first tool call. Reason: without batteryPercent and reportedRangeKm, the route distance is meaningless. Do not call get_route or find_place until you have vehicle state.
+- After get_vehicle_state: if location is not null, use the coordinates directly as the route origin — format as "lat,lon" e.g. "51.5014,-0.1419". Only pass "current" as origin if location is null.
+- Sequence for range queries: (1) get_vehicle_state, (2) get_route with coordinates as origin and destination exactly as driver said, (3) calculate_range. If the destination is genuinely ambiguous, call find_place ONCE between steps 1 and 2. Total tools: maximum 5 (get_vehicle_state + optional find_place + get_route + optional get_weather + calculate_range).
+- EXAMPLE: driver says "will I make it to Birmingham" → get_vehicle_state returns battery=78%, location={lat:51.5014,lon:-0.1419} → get_route("51.5014,-0.1419" → "Birmingham") → calculate_range immediately.
+- EXAMPLE: driver says "will I make it to Old Trafford" → get_vehicle_state → find_place("Old Trafford stadium Manchester") to disambiguate → get_route("51.5014,-0.1419" → resolved address) → calculate_range immediately.
+- NEVER call get_route before get_vehicle_state. NEVER call get_route more than once per range query. Once get_route returns any distance result, call calculate_range immediately.
 - calculate_range requires batteryPercent and reportedRangeKm from get_vehicle_state, and routeDistanceKm and elevationGainM from get_route. If elevationGainM=0 that is fine — use it.
 - If calculate_range returns verdict "borderline" or "no", tell the driver clearly and calmly. Never say they can make it when the verdict is borderline or no.
 - If calculate_range returns verdict "yes" with estimatedArrivalPercent below 15, warn that they will arrive with very little charge.

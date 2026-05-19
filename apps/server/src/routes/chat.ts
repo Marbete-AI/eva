@@ -4,6 +4,7 @@ import { runReasoningLoop } from "../agent/loop.js";
 import { getDevContextManager } from "../context/driver-context.js";
 import { createOrGetUser } from "../memory/user.js";
 import { createSessionRecord } from "../memory/session-record.js";
+import type { NavigationPayload } from "../tools/open-navigation.js";
 
 const chat = new Hono();
 
@@ -59,6 +60,8 @@ chat.post("/chat", async (c) => {
   const metrics = ctxManager.getLatestMetrics();
 
   try {
+    let navigationPayload: NavigationPayload | null = null;
+
     const result = await runReasoningLoop({
       trigger: {
         type: "voice",
@@ -69,12 +72,17 @@ chat.post("/chat", async (c) => {
       context,
       metrics,
       onModeChange: (mode) => ctxManager.setMode(mode),
+      onNavigation: (payload) => {
+        navigationPayload = payload;
+        console.log(`[chat] Navigation: "${payload.label}" → ${payload.googleMapsUrl}`);
+      },
     });
 
     return c.json({
       response: result.text,
       requestId: result.requestId,
       sessionId: context.sessionId,
+      ...(navigationPayload ? { navigation: navigationPayload } : {}),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";

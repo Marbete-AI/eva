@@ -36,7 +36,7 @@ export function makeGetRouteTool(ctx: ToolCallContext) {
     parameters: z.object({
       origin: z
         .string()
-        .describe("Starting location, address, or 'current' for vehicle GPS position"),
+        .describe("Starting location. Preferred format when vehicle location is available: coordinate string '51.5014,-0.1419' (lat,lon from get_vehicle_state). Falls back to 'current' if location is null, or any address string."),
       destination: z
         .string()
         .describe("Destination exactly as the driver said it — informal names, city names, postcodes, or full addresses all work. Do not pre-resolve before calling."),
