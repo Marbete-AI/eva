@@ -12,7 +12,7 @@ import { makeStoreFeedbackTool } from "../tools/store-feedback.js";
 import { makeDispatchHavmcoTool } from "../tools/dispatch-havmco.js";
 import { makeSetModeTool } from "../tools/set-mode.js";
 import { makeInitiateCallTool } from "../tools/initiate-call.js";
-import { makeAskGeminiTool } from "../tools/ask-gemini.js";
+
 import { makeCalculateRangeTool } from "../tools/calculate-range.js";
 import { makeOpenNavigationTool } from "../tools/open-navigation.js";
 import type { NavigationPayload } from "../tools/open-navigation.js";
@@ -101,7 +101,6 @@ export async function runOrchestrator(
       dispatch_havmco: makeDispatchHavmcoTool(toolCtx),
       set_mode: makeSetModeTool(toolCtx, onModeChange ?? ((_mode: SessionMode) => {})),
       initiate_call: makeInitiateCallTool(toolCtx),
-      ask_gemini: makeAskGeminiTool(toolCtx),
       calculate_range: makeCalculateRangeTool(toolCtx),
       open_navigation: makeOpenNavigationTool(toolCtx, onNavigation ?? (() => {})),
       geocode: makeGeocodeTool(toolCtx),

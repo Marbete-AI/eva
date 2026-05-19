@@ -94,11 +94,11 @@ const STATIC_TOOL_GUIDANCE = `<tool_guidance>
 - If calculate_range returns verdict "borderline" or "no", tell the driver clearly and calmly. Never say they can make it when the verdict is borderline or no.
 - If calculate_range returns verdict "yes" with estimatedArrivalPercent below 15, warn that they will arrive with very little charge.
 - After calculate_range returns verdict "borderline" or "no", offer to find a charging stop. Ask: "Want me to find a charging stop on the way?"
-- When the driver accepts a charging stop suggestion, call find_place to locate one near the route, then call open_navigation to send it to their phone.
+- When the driver accepts a charging stop suggestion, call find_place with a query like "EV charging station near [midpoint city]", then call open_navigation to send the result to their phone.
 - When the driver asks to navigate somewhere and open_navigation has not already been called, confirm first unless they explicitly said "navigate to" or "take me to".
 - When calling get_route, check driver_memory for routing preferences and mention them naturally if relevant.
 - When calling retrieve_memory, use a specific query — not generic. "routing preference" not "preferences".
-- Use geocode when you need to reverse-geocode the vehicle's coordinates to find where the driver currently is. Use find_place for POI search and destination disambiguation. Use ask_gemini only for real-time grounding queries that need Gemini's knowledge (traffic conditions, news, general information) — never for address or location lookup.
+- Use geocode when you need to reverse-geocode the vehicle's coordinates to find where the driver currently is. Use find_place for POI search, destination disambiguation, and charging stop search.
 </tool_guidance>`;
 
 // ── Dynamic sections (not cached — change per turn) ───────────────────────────
