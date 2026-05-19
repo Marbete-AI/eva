@@ -16,6 +16,8 @@ import { makeAskGeminiTool } from "../tools/ask-gemini.js";
 import { makeCalculateRangeTool } from "../tools/calculate-range.js";
 import { makeOpenNavigationTool } from "../tools/open-navigation.js";
 import type { NavigationPayload } from "../tools/open-navigation.js";
+import { makeGeocodeTool } from "../tools/geocode.js";
+import { makeFindPlaceTool } from "../tools/find-place.js";
 import { writeMessage, getConversationWindow } from "../memory/messages.js";
 import { getPendingConfirmations } from "../memory/extractor/confirmation-queue.js";
 import { expireRejectedCandidates } from "../memory/extractor/rejection-bank.js";
@@ -102,6 +104,8 @@ export async function runOrchestrator(
       ask_gemini: makeAskGeminiTool(toolCtx),
       calculate_range: makeCalculateRangeTool(toolCtx),
       open_navigation: makeOpenNavigationTool(toolCtx, onNavigation ?? (() => {})),
+      geocode: makeGeocodeTool(toolCtx),
+      find_place: makeFindPlaceTool(toolCtx),
     },
   });
 

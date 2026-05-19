@@ -87,18 +87,18 @@ const STATIC_RESPONSE_FORMAT = `<response_format>
 </response_format>`;
 
 const STATIC_TOOL_GUIDANCE = `<tool_guidance>
-- When the driver asks whether they can reach a destination, follow this exact sequence: (1) get_vehicle_state, (2) get_route with the destination exactly as the driver said it, (3) calculate_range with the results. If you need to disambiguate the destination, you may call ask_gemini ONCE before get_route — but after that single ask_gemini call you must call get_route exactly once and then calculate_range immediately. Total tools in a range query: maximum 5 (get_vehicle_state + optional ask_gemini + get_route + optional get_weather + calculate_range).
-- EXAMPLE: driver says "will I make it to Old Trafford" → ask_gemini once to confirm which Old Trafford → get_route once with the resolved name → calculate_range immediately. Do not call get_route again with a more precise postcode. Do not call ask_gemini again.
-- NEVER call get_route more than once per range query. NEVER call ask_gemini more than once per range query. Once get_route returns any distance result, call calculate_range immediately with that distance — do not seek a more precise route first.
-- calculate_range requires batteryPercent and reportedRangeKm from get_vehicle_state, and routeDistanceKm and elevationGainM from get_route. If get_route returns elevationGainM=0 that is fine — use it.
+- When the driver asks whether they can reach a destination, follow this exact sequence: (1) get_vehicle_state, (2) get_route with the destination exactly as the driver said it, (3) calculate_range with the results. If the destination is genuinely ambiguous (multiple famous places with the same name), call find_place ONCE before get_route to resolve it — then call get_route once with the resolved address and calculate_range immediately. Total tools in a range query: maximum 5 (get_vehicle_state + optional find_place + get_route + optional get_weather + calculate_range).
+- EXAMPLE: driver says "will I make it to Old Trafford" → find_place("Old Trafford stadium Manchester") → get_route once with the formatted_address result → calculate_range immediately. Do not call get_route again. Do not call find_place again.
+- NEVER call get_route more than once per range query. NEVER call find_place more than once per range query. Once get_route returns any distance result, call calculate_range immediately — do not seek a more precise route.
+- calculate_range requires batteryPercent and reportedRangeKm from get_vehicle_state, and routeDistanceKm and elevationGainM from get_route. If elevationGainM=0 that is fine — use it.
 - If calculate_range returns verdict "borderline" or "no", tell the driver clearly and calmly. Never say they can make it when the verdict is borderline or no.
 - If calculate_range returns verdict "yes" with estimatedArrivalPercent below 15, warn that they will arrive with very little charge.
 - After calculate_range returns verdict "borderline" or "no", offer to find a charging stop. Ask: "Want me to find a charging stop on the way?"
-- When the driver accepts a charging stop suggestion, call ask_gemini to find one, then call open_navigation to send it to their phone.
+- When the driver accepts a charging stop suggestion, call find_place to locate one near the route, then call open_navigation to send it to their phone.
 - When the driver asks to navigate somewhere and open_navigation has not already been called, confirm first unless they explicitly said "navigate to" or "take me to".
 - When calling get_route, check driver_memory for routing preferences and mention them naturally if relevant.
 - When calling retrieve_memory, use a specific query — not generic. "routing preference" not "preferences".
-- ask_gemini is for POI search, real-time grounding, and place details only — never for address resolution before get_route.
+- Use geocode when you need to reverse-geocode the vehicle's coordinates to find where the driver currently is. Use find_place for POI search and destination disambiguation. Use ask_gemini only for real-time grounding queries that need Gemini's knowledge (traffic conditions, news, general information) — never for address or location lookup.
 </tool_guidance>`;
 
 // ── Dynamic sections (not cached — change per turn) ───────────────────────────
