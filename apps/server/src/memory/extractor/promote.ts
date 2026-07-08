@@ -90,6 +90,7 @@ export async function writeCandidateAndMaybePromote(opts: {
       content: candidate.content,
       source: "conversation",
       weight: candidate.confidence >= 0.9 ? 2.0 : 1.5,
+      category: candidate.category,
     });
 
     // Still write the candidate row for audit trail and analyser visibility
@@ -250,6 +251,7 @@ async function checkAndPromoteByRepetition(
     content,
     source: "conversation",
     weight: 1.2,
+    category,
   });
 
   await supabase

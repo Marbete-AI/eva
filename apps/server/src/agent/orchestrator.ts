@@ -21,6 +21,7 @@ import { makeFindPlaceTool } from "../tools/find-place.js";
 import { writeMessage, getConversationWindow } from "../memory/messages.js";
 import { getPendingConfirmations } from "../memory/extractor/confirmation-queue.js";
 import { expireRejectedCandidates } from "../memory/extractor/rejection-bank.js";
+import { buildSiloSnapshot, runInferenceEngine } from "../inference/engine.js";
 
 const CONVERSATION_WINDOW_TURNS = parseInt(
   process.env["CONVERSATION_WINDOW_TURNS"] ?? "30",
@@ -82,8 +83,30 @@ export async function runOrchestrator(
   // Expire any stale rejected candidates (fire-and-forget)
   void expireRejectedCandidates(context.driverId);
 
-  // 3. Build system prompt with history + confirmations injected
-  const systemPrompt = buildSystemPrompt(context, metrics, conversationHistory, pendingConfirmations);
+  // 3. Run the Active Inference Engine over the current silo snapshot.
+  // Recent driver messages (this turn + up to 5 prior) feed Silo 2.
+  const recentDriverMessages = [
+    ...conversationHistory
+      .filter(t => t.role === "user")
+      .slice(-5)
+      .map(t => t.content),
+    message,
+  ];
+  const snapshot = buildSiloSnapshot(context, metrics, recentDriverMessages);
+  const { stateVector } = runInferenceEngine(
+    snapshot,
+    context.driverId,
+    context.sessionId
+  );
+
+  // 4. Build system prompt with history + confirmations + driver state injected
+  const systemPrompt = buildSystemPrompt(
+    context,
+    metrics,
+    conversationHistory,
+    pendingConfirmations,
+    stateVector
+  );
 
   // 4. Run reasoning
   const result = await generateText({

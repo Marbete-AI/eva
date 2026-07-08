@@ -7,11 +7,15 @@ export interface StoreMemoryInput {
   content: string;
   source: MemoryChunk["source"];
   weight?: number;
+  /** Memory category — drives category-aware retrieval decay (migration 007) */
+  category?: string;
 }
 
 /**
  * Write a memory chunk to Supabase.
  * Embeds the content and stores both text + vector.
+ * Category is carried through from the extraction candidate so retrieval
+ * decay can be category-aware (identity persists, moods fade).
  * Non-fatal if Supabase not configured — logs and returns null.
  */
 export async function storeMemory(input: StoreMemoryInput): Promise<string | null> {
@@ -22,6 +26,7 @@ export async function storeMemory(input: StoreMemoryInput): Promise<string | nul
   }
 
   const embedding = await embedText(input.content);
+  const now = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("memory_chunks")
@@ -33,6 +38,8 @@ export async function storeMemory(input: StoreMemoryInput): Promise<string | nul
       embedding: embedding ?? null,
       source: input.source,
       weight: input.weight ?? 1.0,
+      category: input.category ?? null,
+      last_reinforced_at: now,
     })
     .select("id")
     .single();
@@ -42,6 +49,24 @@ export async function storeMemory(input: StoreMemoryInput): Promise<string | nul
     return null;
   }
 
-  console.log(`[memory:store] Stored chunk ${data.id} for user ${input.userId}`);
+  console.log(`[memory:store] Stored chunk ${data.id} for user ${input.userId}${input.category ? ` (${input.category})` : ""}`);
   return data.id as string;
+}
+
+/**
+ * Reinforce an existing memory — restarts its decay clock.
+ * Call when a memory is re-observed, re-confirmed, or proves relevant.
+ */
+export async function reinforceMemory(memoryId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase
+    .from("memory_chunks")
+    .update({ last_reinforced_at: new Date().toISOString() })
+    .eq("id", memoryId);
+
+  if (error) {
+    console.error("[memory:store] Reinforce error:", error.message);
+  }
 }

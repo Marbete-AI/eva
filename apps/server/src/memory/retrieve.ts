@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "./supabase-client.js";
 import { embedText } from "./embeddings.js";
 import type { MemoryChunk } from "@eva/types";
+import { DECAY_PARAMS, DEFAULT_DECAY, type MemoryCategory } from "./extractor/categories.js";
 
 export interface RetrieveMemoryInput {
   userId: string;
@@ -10,13 +11,14 @@ export interface RetrieveMemoryInput {
 }
 
 /**
- * Hybrid memory retrieval:
+ * Hybrid memory retrieval — real-world tuned:
  *   1. Semantic similarity (pgvector cosine distance)
- *   2. Recency weight (exponential decay, half-life ~7 days)
+ *   2. Category-aware recency decay (identity persists ~1yr, moods fade in 2 days)
+ *      with a per-category floor so confirmed memories never fully vanish
  *   3. Explicit preference weight (stored weight field)
  *
  * Combined score = similarity * recency * weight
- * Returns top-N chunks sorted by combined score.
+ * Decay runs from last_reinforced_at — re-confirmed memories stay fresh.
  *
  * Falls back to empty array if Supabase not configured or embedding fails.
  */
@@ -60,10 +62,6 @@ export async function retrieveMemory(
     return [];
   }
 
-  // Re-rank: similarity * recency_decay * weight
-  const now = Date.now();
-  const HALF_LIFE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-
   interface RawChunk {
     id: string;
     content: string;
@@ -71,12 +69,49 @@ export async function retrieveMemory(
     weight: number;
     created_at: string;
     similarity: number;
+    category?: string | null;
+    last_reinforced_at?: string | null;
   }
 
-  const ranked = (data as RawChunk[])
+  const rawChunks = data as RawChunk[];
+
+  // The RPC may not return category/last_reinforced_at (pre-007 function).
+  // Fetch them in one query for the matched IDs so decay is category-aware.
+  const ids = rawChunks.map(r => r.id);
+  const metaById = new Map<string, { category: string | null; lastReinforcedAt: string | null }>();
+  if (ids.length > 0) {
+    const { data: metaRows } = await supabase
+      .from("memory_chunks")
+      .select("id, category, last_reinforced_at")
+      .in("id", ids);
+    for (const row of metaRows ?? []) {
+      metaById.set(row.id as string, {
+        category: (row.category as string | null) ?? null,
+        lastReinforcedAt: (row.last_reinforced_at as string | null) ?? null,
+      });
+    }
+  }
+
+  // Re-rank: similarity * category-aware recency decay * weight
+  const now = Date.now();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  const ranked = rawChunks
     .map((row) => {
-      const ageMs = now - new Date(row.created_at).getTime();
-      const recency = Math.exp((-Math.LN2 * ageMs) / HALF_LIFE_MS);
+      const meta = metaById.get(row.id);
+      const decay =
+        meta?.category && meta.category in DECAY_PARAMS
+          ? DECAY_PARAMS[meta.category as MemoryCategory]
+          : DEFAULT_DECAY;
+
+      // Decay from last_reinforced_at when available, else created_at
+      const anchor = meta?.lastReinforcedAt ?? row.created_at;
+      const ageMs = Math.max(0, now - new Date(anchor).getTime());
+      const halfLifeMs = decay.halfLifeDays * DAY_MS;
+
+      const rawRecency = Math.exp((-Math.LN2 * ageMs) / halfLifeMs);
+      const recency = Math.max(decay.recencyFloor, rawRecency);
+
       const combinedScore = row.similarity * recency * row.weight;
       return { ...row, combinedScore };
     })

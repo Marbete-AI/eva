@@ -225,6 +225,7 @@ async function promoteConfirmedCandidate(candidateId: string): Promise<void> {
     content: candidate.content as string,
     source: "explicit_preference",
     weight: 1.8, // Driver-confirmed — high weight
+    category: (candidate.category as string) ?? undefined,
   });
 
   await supabase

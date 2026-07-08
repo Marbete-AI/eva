@@ -342,11 +342,21 @@ async function writePatternAndMaybePromote(
     : pattern.confidence;
 
   if (finalConfidence >= PATTERN_PROMOTION_THRESHOLD) {
+    // Map pattern type prefix to a memory category for decay purposes
+    const prefix = pattern.patternType.split(".")[0] ?? "";
+    const category =
+      prefix === "routine" ? "routine"
+      : prefix === "interaction" ? "behavioural_interaction"
+      : prefix === "audio" ? "preference_audio"
+      : prefix === "range_anxiety" ? "vehicle_state_pattern"
+      : "behavioural_driving";
+
     const memoryId = await storeMemory({
       userId,
       content: pattern.description,
       source: "adas_event",
       weight: finalConfidence * 1.5,
+      category,
     });
 
     await supabase

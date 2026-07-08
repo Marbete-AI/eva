@@ -24,3 +24,6 @@ export * from "./tools.js";
 
 // Signal interpreter output
 export * from "./interpreter.js";
+
+// Active Inference System
+export * from "./inference.js";

@@ -1,4 +1,4 @@
-import type { DriverContext, InterpretedMetrics } from "@eva/types";
+import type { DriverContext, DriverStateVector, InterpretedMetrics } from "@eva/types";
 
 /**
  * Builds the EVA system prompt using XML-tagged sections.
@@ -24,7 +24,8 @@ export function buildSystemPrompt(
   context: DriverContext,
   metrics: InterpretedMetrics | null,
   conversationHistory: ConversationTurn[] = [],
-  pendingConfirmations: PendingConfirmationHint[] = []
+  pendingConfirmations: PendingConfirmationHint[] = [],
+  driverStateVector: DriverStateVector | null = null
 ): string {
   const persona = context.persona === "copilot"
     ? COPILOT_PERSONA
@@ -39,6 +40,7 @@ export function buildSystemPrompt(
     STATIC_RESPONSE_FORMAT,
     STATIC_TOOL_GUIDANCE,
     buildDynamicContext(context, metrics),
+    buildDriverStateSection(driverStateVector),
     buildMemorySection(context),
     buildConversationHistorySection(conversationHistory),
     buildConfirmationSection(pendingConfirmations, context),
@@ -150,6 +152,60 @@ function buildDynamicContext(
   return [vehicleSection, metricsSection, envSection, sessionSection]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * Driver state section — output of the Active Inference Engine.
+ * States above 0.35 confidence are surfaced as natural language hints.
+ * The LLM reads these as context, not hard instructions — the persona
+ * and response format rules decide how state changes behaviour.
+ */
+function buildDriverStateSection(
+  stateVector: DriverStateVector | null
+): string {
+  if (!stateVector) return "";
+
+  const active = (Object.entries(stateVector) as Array<[string, number]>)
+    .filter(([state, conf]) => conf >= 0.35 && state !== "calm")
+    .sort((a, b) => b[1] - a[1]);
+
+  if (active.length === 0) return "";
+
+  const lines = active
+    .map(([state, conf]) => `${state.replace(/_/g, " ")} (${Math.round(conf * 100)}% confidence)`)
+    .join(", ");
+
+  const behaviouralHints: string[] = [];
+  for (const [state] of active) {
+    switch (state) {
+      case "fatigued":
+        behaviouralHints.push(
+          "The driver may be tired. Be attentive without being alarmist. If natural, gently suggest a rest stop or a check-in. Keep responses calm and clear."
+        );
+        break;
+      case "stressed":
+        behaviouralHints.push(
+          "The driver appears under pressure. Be direct and solution-focused. No small talk, no long explanations. Offer concrete help."
+        );
+        break;
+      case "distracted":
+        behaviouralHints.push(
+          "The driver's attention seems divided. Keep responses minimal. Defer non-urgent topics."
+        );
+        break;
+      case "late_for_event":
+        behaviouralHints.push(
+          "The driver is likely running late. Maximum brevity. Prioritise speed and actionable information."
+        );
+        break;
+    }
+  }
+
+  return `<driver_state>
+The driver currently appears: ${lines}.
+${behaviouralHints.join("\n")}
+This is inferred context, not stated by the driver. Do not announce that you have detected their state — adapt naturally.
+</driver_state>`;
 }
 
 function buildMemorySection(context: DriverContext): string {

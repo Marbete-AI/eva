@@ -50,6 +50,7 @@ export function makeStoreFeedbackTool(ctx: ToolCallContext) {
               ? `Driver preference/correction: ${content}`
               : `Driver positive feedback: ${content}`,
           source: "feedback",
+          category: "preference_communication",
           weight: feedbackType === "voice_correction" ? 1.5 : 1.0,
         });
       }
